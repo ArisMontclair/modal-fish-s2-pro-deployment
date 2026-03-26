@@ -1,2 +1,1 @@
 modal>=0.73
-huggingface-hub>=0.25
