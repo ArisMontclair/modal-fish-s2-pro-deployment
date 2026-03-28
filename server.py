@@ -168,6 +168,7 @@ def server():
         if not server_ready:
             raise HTTPException(status_code=503, detail="Server still loading models")
 
+        tmp_path = None
         try:
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                 f.write(await audio.read())
@@ -186,7 +187,6 @@ def server():
             )
 
             text = " ".join([s.text for s in segments]).strip()
-            os.unlink(tmp_path)
 
             return JSONResponse({
                 "text": text,
@@ -195,6 +195,9 @@ def server():
             })
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
     # ─── TTS: Fish Speech ────────────────────────────────────────
     @web_app.post("/v1/tts")

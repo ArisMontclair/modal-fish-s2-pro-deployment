@@ -5,18 +5,15 @@ Browser-based voice interface for Aris (OpenClaw).
 Pipeline (you talk):
   Browser mic → Modal (Whisper STT) → text → OpenClaw (Aris) → reply text
     → Modal (Fish Speech TTS) → Browser speaker
-
-Pipeline (Aris talks to you):
-  Aris POST /speak → Modal (Fish Speech TTS) → Browser speaker
 """
 
 import os
 import asyncio
 import json
-import subprocess
 from dotenv import load_dotenv
 from loguru import logger
 
+import aiohttp
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
@@ -24,11 +21,8 @@ from pipecat.frames.frames import (
     Frame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMMessagesFrame,
-    LLMRunFrame,
     TextFrame,
     TranscriptionFrame,
-    TTSStoppedFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -127,23 +121,18 @@ async def query_openclaw(text: str) -> str:
 
 
 class OpenClawBridge(FrameProcessor):
-    """Intercepts transcription frames, routes to OpenClaw, emits LLM response.
+    """Intercepts transcription frames, routes to OpenClaw, emits TTS-ready frames.
 
-    When OpenClaw is configured:
-      STT → [TranscriptionFrame] → OpenClawBridge → [TextFrame] → TTS
-    When OpenClaw is NOT configured:
-      STT → [TranscriptionFrame] → passes through to OpenRouterLLM → TTS
+    Pipeline: STT → [TranscriptionFrame] → OpenClawBridge → [TextFrame] → TTS
     """
 
-    def __init__(self, openrouter_fallback: OpenRouterLLMService):
+    def __init__(self):
         super().__init__()
-        self._fallback = openrouter_fallback
         self._use_openclaw = bool(OPENCLAW_GATEWAY_URL)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        # Only intercept transcription frames when OpenClaw is configured
         if isinstance(frame, TranscriptionFrame) and self._use_openclaw:
             text = frame.text.strip()
             if not text:
@@ -151,22 +140,21 @@ class OpenClawBridge(FrameProcessor):
 
             logger.info(f"→ OpenClaw: [{text}]")
 
-            # Try OpenClaw first
             response = await query_openclaw(text)
 
             if response:
                 logger.info(f"← OpenClaw: [{response}]")
-                # Push LLM response frames to trigger TTS
+                # These frames trigger TTS in the pipeline
                 await self.push_frame(LLMFullResponseStartFrame())
                 await self.push_frame(TextFrame(text=response))
                 await self.push_frame(LLMFullResponseEndFrame())
-                return
-
-            # Fallback to direct OpenRouter LLM
-            logger.info("OpenClaw unavailable, falling back to OpenRouter")
-            await self.push_frame(frame, direction)
+            else:
+                # OpenClaw failed — speak an error rather than silence
+                logger.warning("OpenClaw unavailable, speaking fallback")
+                await self.push_frame(LLMFullResponseStartFrame())
+                await self.push_frame(TextFrame(text="Sorry, I couldn't reach my brain. Try again."))
+                await self.push_frame(LLMFullResponseEndFrame())
         else:
-            # Pass everything else through
             await self.push_frame(frame, direction)
 
 
@@ -208,8 +196,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         )
 
         # ─── OpenClaw Bridge ───────────────────────────────────────
-        # Intercepts transcriptions and routes to OpenClaw when configured
-        bridge = OpenClawBridge(openrouter_fallback=llm)
+        bridge = OpenClawBridge()
 
         # ─── TTS: Self-Hosted Fish Speech (Modal GPU) ──────────────
         tts = FishSpeechSelfHostedTTS(
