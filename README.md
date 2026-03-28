@@ -1,121 +1,188 @@
 # Aris Voice Agent
 
-Talk to Aris from any browser. Open a URL, speak, get a voice response.
+Talk to Aris from any browser. Phone, laptop, anything.
+
+Open the page → tap Connect → speak → Aris responds with voice.
+
+**What this does:**
+- You talk into your browser → Aris hears you and responds with voice
+- Aris has full access to his brain (OpenClaw) — memory, tools, coaching
+- GPU only runs when you're talking (pay-per-use via Modal)
+- Runs on your Synology via Docker
 
 ---
 
-## QUICK START
+## What's in this repo
 
-### Step 1: Deploy GPU server on Modal
+| File | Purpose |
+|------|---------|
+| `bot.py` | The web server + voice pipeline. Runs on Synology. |
+| `dashboard.html` | The web page you open in your browser. Dark theme, status lights, log. |
+| `server.py` | GPU server (Modal). Runs Whisper (speech-to-text) + Fish Speech (text-to-speech). |
+| `whisper_stt.py` | Connects bot → Whisper on Modal |
+| `fish_speech_tts.py` | Connects bot → Fish Speech on Modal |
+| `Dockerfile` | Builds the bot container (includes OpenClaw CLI) |
+| `docker-compose.yml` | Runs bot + Caddy (HTTPS) on Synology |
+| `Caddyfile` | HTTPS reverse proxy config |
+
+---
+
+## How it works
+
+```
+You (iPhone browser)
+    ↕  WebRTC (your voice goes up, Aris's voice comes down)
+Synology (this repo)
+    ├── Bot (handles WebRTC, pipeline)
+    └── Caddy (HTTPS)
+    ↕  HTTP (text + audio)
+Modal GPU (cloud, on-demand)
+    ├── Whisper → turns your voice into text
+    └── Fish Speech → turns Aris's text into voice
+    ↕  HTTP (text)
+This server (Aris's brain)
+    └── OpenClaw → memory, tools, coaching, personality
+```
+
+When you speak:
+1. Browser sends audio to Synology bot
+2. Bot sends audio to Modal → Whisper turns it into text
+3. Bot sends text to OpenClaw (Aris's brain) on your server
+4. Aris thinks and writes a response
+5. Bot sends response to Modal → Fish Speech turns it into voice
+6. Voice plays in your browser
+
+---
+
+## Setup — 4 steps
+
+### Step 1: Deploy GPU server on Modal (one-time, ~10 min)
+
+Modal runs the GPU models so your Synology doesn't need a GPU.
 
 ```bash
+# Install Modal CLI
 pip install modal
 modal setup
+
+# From this repo directory:
 modal deploy server.py
 ```
 
-This deploys **both Whisper STT + Fish Speech TTS** on a single A10G GPU.
-It returns a URL like `https://your-org--aris-voice-server.modal.run`.
+This deploys **Whisper + Fish Speech** on a single A10G GPU.
 
-**First deploy:** ~10 min (downloads ~10GB of model weights).
-**After that:** instant.
+**First time:** Downloads ~10GB of model weights. Takes 10-15 minutes.
+**After that:** Instant deploy.
 
-### Step 2: Configure
+When it finishes, it prints a URL. Save it. Example:
+```
+https://your-org--aris-voice-server.modal.run
+```
+
+### Step 2: Configure the bot
 
 ```bash
 cp .env.example .env
 ```
 
-Fill in:
-```
-OPENROUTER_API_KEY=sk-or-v1-your-key
+Edit `.env` — you need to fill in **4 things**:
+
+```bash
+# 1. Your OpenRouter API key (get one at https://openrouter.ai)
+OPENROUTER_API_KEY=sk-or-v1-xxxxx
+
+# 2. The Modal URL from step 1
 VOICE_SERVER_URL=https://your-org--aris-voice-server.modal.run
-BOT_SECRET=some-random-string
+
+# 3. This server's gateway (Aris's brain)
+OPENCLAW_GATEWAY_URL=ws://192.168.178.134:18789
+OPENCLAW_GATEWAY_TOKEN=REDACTED
+
+# 4. A random secret (for the /speak endpoint)
+BOT_SECRET=whatever-you-want
 ```
 
-### Step 3: Run the bot
+Everything else can stay as-is.
+
+### Step 3: Run on Synology
 
 ```bash
-pip install -e .
-python bot.py
-```
-
-Open **http://localhost:7860** in Chrome. Click Connect → talk.
-
-**First message:** 10-15 sec (Modal cold-start).
-**After that:** instant.
-
----
-
-## DEPLOY TO SYNOLOGY
-
-```bash
-# Copy repo to Synology
+# Copy this repo to Synology
 scp -r . synology:/path/to/aris-voice/
 
-# Edit Caddyfile: replace aris.yourdomain.com with your domain
-# Make sure DNS points to Synology's public IP
-
+# On Synology:
+cd /path/to/aris-voice
 docker compose up -d
 ```
 
+This starts:
+- **Bot** on port 7860 (the voice agent)
+- **Caddy** on ports 80/443 (HTTPS reverse proxy)
+
+### Step 4: Set up HTTPS
+
+WebRTC needs HTTPS for microphone access. Two options:
+
+**Option A: Use Caddy with a domain (recommended)**
+
+Edit `Caddyfile` — replace `aris.yourdomain.com` with your actual domain:
+```
+aris.yourdomain.com {
+    reverse_proxy bot:7860
+}
+```
+
+Point your domain's DNS to your Synology's public IP. Caddy automatically gets an HTTPS certificate via Let's Encrypt.
+
 Then open `https://aris.yourdomain.com` from your iPhone.
 
----
+**Option B: Quick test without a domain**
 
-## OPENCLAW INTEGRATION
+For local testing on your LAN, Chrome requires a flag:
+1. Open `chrome://flags/#unsafely-treat-insecure-origin-as-secure`
+2. Add `http://your-synology-ip:7860`
+3. Restart Chrome
 
-Voice-Aris connects to your OpenClaw instance. Gives it memory, tools, coaching.
-
-In `.env`:
-```
-OPENCLAW_GATEWAY_URL=ws://your-server-ip:18789
-```
-
-When you speak, the bot:
-1. Audio → Modal Whisper → text
-2. Text → `openclaw agent` → Aris's response (full context)
-3. Response → Modal Fish Speech → audio → your speakers
+Then open `http://your-synology-ip:7860`.
 
 ---
 
-## ARI TALKS TO YOU
+## The dashboard
 
-```bash
-curl -X POST https://your-domain.com/speak \
-  -H "Authorization: Bearer your-bot-secret" \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Dominius deadline is tomorrow. How are we looking?"}'
-```
+When you open the page, you see:
+
+- **Three status cards** with colored dots: Modal GPU, OpenClaw, WebRTC
+  - 🟢 Green = working
+  - 🟡 Yellow = loading/connecting
+  - 🔴 Red = down/unreachable
+- **Big connect button** — tap to start talking to Aris
+- **Settings panel** — tap ⚙️ to expand, edit URLs without restarting Docker
+- **Log panel** — timestamped events for troubleshooting
+
+Health checks run automatically every 30 seconds.
 
 ---
 
-## ARCHITECTURE
+## Cost
 
-```
-Browser (WebRTC)
-    ↕
-Synology Docker
-├── Pipecat bot (no GPU)
-└── Caddy (HTTPS)
-    ↕
-Modal GPU (A10G, 15s scale-down)
-├── Whisper large-v3 (STT)  ─ same container
-└── Fish Speech S2 Pro (TTS) ─ 
-    ↕
-OpenClaw (this server)
-```
+Modal charges per-second for GPU usage:
 
-**Cost:** ~$0.80/hr A10G, only when active. ~$0.40/day for 30 min use.
+- **A10G GPU:** ~$0.80/hour
+- **Scale-down:** GPU shuts down 15 seconds after your last request
+- **Typical usage:** ~$0.40/day for 30 minutes of conversation
+- **Cold start:** First request after idle = 10-15 seconds (model loading)
 
-## FILES
+You only pay when you're actively talking.
 
-| File | Purpose |
-|------|---------|
-| `bot.py` | Pipecat pipeline + WebRTC + OpenClaw bridge |
-| `server.py` | Modal GPU server (Whisper + Fish Speech combined) |
-| `whisper_stt.py` | Custom STT service (HTTP to Modal) |
-| `fish_speech_tts.py` | Custom TTS service (HTTP to Modal) |
-| `Dockerfile` | Bot container (includes OpenClaw CLI) |
-| `docker-compose.yml` | Synology: bot + Caddy |
-| `Caddyfile` | HTTPS reverse proxy |
+---
+
+## Troubleshooting
+
+| Problem | Cause | Fix |
+|---------|-------|-----|
+| 15 second delay on first message | Modal cold-starting GPU models | Normal. Subsequent messages are instant. |
+| No mic access | Browser requires HTTPS | Set up Caddy with a domain, or use Chrome flag for local testing. |
+| Modal GPU shows red | Server URL wrong or models still loading | Check `VOICE_SERVER_URL` in `.env`. Check `/health` endpoint. |
+| OpenClaw shows red | Gateway unreachable from Docker | Check `OPENCLAW_GATEWAY_URL`. Make sure the server is on the same network. |
+| Bot crashes on startup | Missing env vars | Check `.env` — all 4 required values must be set. |
+| Docker build fails | Network issue | Run `docker compose build --no-cache` |
