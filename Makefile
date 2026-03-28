@@ -1,4 +1,4 @@
-.PHONY: setup run docker-build docker-up docker-down deploy-stt deploy-tts deploy
+.PHONY: setup run docker-build docker-up docker-down deploy deploy-local
 
 setup:
 	python3 -m venv .venv
@@ -21,12 +21,10 @@ docker-up:
 docker-down:
 	docker compose down
 
-deploy-stt:
-	modal deploy stt_server.py
-
-deploy-tts:
-	modal deploy tts_server.py
-
-deploy-modal: deploy-stt deploy-tts
+deploy:
+	modal deploy server.py
 	@echo ""
-	@echo "Modal GPU services deployed. Update .env with the URLs."
+	@echo "Done. Update VOICE_SERVER_URL in .env with the Modal URL."
+
+deploy-local:
+	python server.py

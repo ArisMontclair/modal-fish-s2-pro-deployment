@@ -53,8 +53,7 @@ from whisper_stt import WhisperRemoteSTT
 load_dotenv(override=True)
 
 # ─── Config ─────────────────────────────────────────────────────
-WHISPER_STT_URL = os.getenv("WHISPER_STT_URL", "http://localhost:8000")
-FISH_TTS_URL = os.getenv("FISH_TTS_URL", "http://localhost:8080")
+VOICE_SERVER_URL = os.getenv("VOICE_SERVER_URL", "http://localhost:8080")
 OPENCLAW_GATEWAY_URL = os.getenv("OPENCLAW_GATEWAY_URL", "")
 BOT_SECRET = os.getenv("BOT_SECRET", "")
 BOT_PORT = int(os.getenv("BOT_PORT", "7860"))
@@ -154,7 +153,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # ─── STT: Remote Whisper (Modal GPU) ────────────────────────
     stt = WhisperRemoteSTT(
-        base_url=WHISPER_STT_URL,
+        base_url=VOICE_SERVER_URL,
         aiohttp_session=http_session,
         language="",
     )
@@ -168,7 +167,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # ─── TTS: Self-Hosted Fish Speech (Modal GPU) ──────────────
     tts = FishSpeechSelfHostedTTS(
-        base_url=FISH_TTS_URL,
+        base_url=VOICE_SERVER_URL,
         aiohttp_session=http_session,
         reference_id=os.getenv("FISH_VOICE_ID", ""),
     )
@@ -253,7 +252,7 @@ async def speak_handler(request: web.Request) -> web.Response:
         session = aiohttp.ClientSession()
         try:
             async with session.post(
-                f"{FISH_TTS_URL}/v1/tts",
+                f"{VOICE_SERVER_URL}/v1/tts",
                 json={
                     "text": text,
                     "format": "wav",
