@@ -1,9 +1,8 @@
 """
-Fish Speech S2 Pro — Self-Hosted TTS Server on Modal
+Fish Speech S2 Pro TTS Server on Modal
 
-Deploy:  modal deploy fish_speech_server.py
-Health:  curl https://your-org--fish-speech-tts-health.modal.run
-TTS:     curl -X POST https://your-org--fish-speech-tts-server.modal.run/v1/tts \
+Deploy:  modal deploy tts_server.py
+Test:    curl -X POST https://your-org--fish-tts-server.modal.run/v1/tts \
            -H "Content-Type: application/json" \
            -d '{"text": "Hello!", "format": "wav"}' \
            --output test.wav
@@ -12,8 +11,8 @@ TTS:     curl -X POST https://your-org--fish-speech-tts-server.modal.run/v1/tts 
 import subprocess
 import modal
 
-# ─── Modal Image ────────────────────────────────────────────────
-fish_speech_image = (
+# ─── Image ──────────────────────────────────────────────────────
+tts_image = (
     modal.Image.from_registry(
         "nvidia/cuda:12.4.1-devel-ubuntu22.04",
         add_python="3.12",
@@ -31,19 +30,15 @@ fish_speech_image = (
         "huggingface_hub>=0.24.0",
         "accelerate",
         "einops",
-        "pydantic",
         "ormsgpack",
         "websockets",
         "uvicorn",
         "fastapi",
-        "gradio",
     )
     .run_commands("pip install -e '.[server]'")
 )
 
-# ─── App ────────────────────────────────────────────────────────
-app = modal.App("fish-speech-tts", image=fish_speech_image)
-
+app = modal.App("fish-tts", image=tts_image)
 model_volume = modal.Volume.from_name("fish-speech-models", create_if_missing=True)
 
 MODEL_DIR = "/models"
@@ -54,7 +49,7 @@ PORT = 8080
 @app.function(
     gpu="A10G",
     timeout=3600,
-    scaledown_window=300,
+    scaledown_window=15,
     volumes={MODEL_DIR: model_volume},
     memory=16384,
 )
@@ -95,6 +90,6 @@ def server():
 
 
 @app.function(image=modal.Image.debian_slim(), timeout=10)
-@modal.web_endpoint(method="GET", label="health")
+@modal.web_endpoint(method="GET", label="fish-health")
 def health():
     return {"status": "ok", "model": "fish-speech-s2-pro"}

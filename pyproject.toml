@@ -1,7 +1,7 @@
 [project]
-name = "modal-fish-s2-pro"
-version = "0.3.0"
-description = "Real-time voice AI agent: Pipecat + Whisper + Smart Turn + OpenRouter + Self-Hosted Fish S2 Pro"
+name = "aris-voice-agent"
+version = "1.0.0"
+description = "Aris voice interface: browser-based voice agent with self-hosted TTS/STT on Modal GPU"
 requires-python = ">=3.10"
 dependencies = [
     "pipecat-ai[whisper,openrouter,daily,silero,local-smart-turn]>=0.0.70",

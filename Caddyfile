@@ -1,0 +1,13 @@
+# Replace aris.yourdomain.com with your actual domain
+# Caddy auto-provisions HTTPS via Let's Encrypt
+
+aris.yourdomain.com {
+    reverse_proxy bot:7860
+
+    # WebSocket support (needed for WebRTC signaling)
+    @websockets {
+        header Connection *Upgrade*
+        header Upgrade websocket
+    }
+    reverse_proxy @websockets bot:7860
+}

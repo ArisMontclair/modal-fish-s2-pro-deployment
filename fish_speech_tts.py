@@ -1,12 +1,10 @@
 """
 Fish Speech Self-Hosted TTS Service for Pipecat
-Connects to a self-hosted Fish Speech S2 Pro HTTP server.
-No cloud API key needed — unlimited usage, zero cost.
+Connects to a self-hosted Fish Speech S2 Pro HTTP server (Modal).
 """
 
-import asyncio
-from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, AsyncIterator, Optional
+from dataclasses import dataclass
+from typing import Any, AsyncGenerator, Optional
 
 import aiohttp
 from loguru import logger
@@ -23,8 +21,6 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 
 @dataclass
 class FishSpeechTTSSettings(TTSSettings):
-    """Settings for FishSpeechSelfHostedTTS."""
-
     reference_id: Optional[str] = None
     format: str = "wav"
     temperature: float = 0.7
@@ -38,15 +34,6 @@ class FishSpeechSelfHostedTTS(TTSService):
     """Pipecat TTS service for self-hosted Fish Speech S2 Pro.
 
     Connects to a Fish Speech HTTP API server (POST /v1/tts).
-    Supports emotion tags, voice references, and streaming audio.
-
-    Usage:
-        session = aiohttp.ClientSession()
-        tts = FishSpeechSelfHostedTTS(
-            base_url="http://localhost:8080",
-            aiohttp_session=session,
-            reference_id="my-speaker",
-        )
     """
 
     Settings = FishSpeechTTSSettings
@@ -61,27 +48,11 @@ class FishSpeechSelfHostedTTS(TTSService):
         settings: Optional[Settings] = None,
         **kwargs,
     ):
-        """Initialize the Fish Speech TTS service.
-
-        Args:
-            base_url: Base URL of the self-hosted Fish Speech server
-                      (e.g. "http://localhost:8080" or "https://xxx.modal.run").
-            aiohttp_session: aiohttp ClientSession for HTTP requests.
-            reference_id: Voice reference ID for cloning/custom voice.
-
-                .. deprecated::
-                    Use ``settings=FishSpeechSelfHostedTTS.Settings(reference_id=...)``.
-
-            settings: Runtime-updatable settings.
-            **kwargs: Additional arguments passed to parent TTSService.
-        """
         default_settings = self.Settings(
             model=None, voice=None, language=None, reference_id=None
         )
-
         if reference_id is not None:
             default_settings.reference_id = reference_id
-
         if settings is not None:
             default_settings.apply_update(settings)
 
@@ -94,12 +65,9 @@ class FishSpeechSelfHostedTTS(TTSService):
 
         if base_url.endswith("/"):
             base_url = base_url[:-1]
-
         self._base_url = base_url
         self._session = aiohttp_session
-        logger.info(
-            f"FishSpeechSelfHostedTTS initialized: {self._base_url}/v1/tts"
-        )
+        logger.info(f"FishSpeechSelfHostedTTS initialized: {self._base_url}/v1/tts")
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -108,19 +76,9 @@ class FishSpeechSelfHostedTTS(TTSService):
     async def run_tts(
         self, text: str, context_id: str
     ) -> AsyncGenerator[Frame, None]:
-        """Generate speech from text using self-hosted Fish Speech S2 Pro.
-
-        Args:
-            text: Text to synthesize (supports [whisper], [excited] etc. tags).
-            context_id: Unique identifier for this TTS context.
-
-        Yields:
-            Frame: Audio frames containing the synthesized speech.
-        """
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         url = f"{self._base_url}/v1/tts"
-
         payload = {
             "text": text,
             "format": self._settings.format,
@@ -130,30 +88,22 @@ class FishSpeechSelfHostedTTS(TTSService):
             "chunk_length": self._settings.chunk_length,
             "normalize": self._settings.normalize,
         }
-
         if self._settings.reference_id:
             payload["reference_id"] = self._settings.reference_id
 
-        headers = {"Content-Type": "application/json"}
-
         try:
             async with self._session.post(
-                url, json=payload, headers=headers
+                url, json=payload, headers={"Content-Type": "application/json"}
             ) as response:
                 if response.status != 200:
                     error = await response.text()
-                    logger.error(
-                        f"Fish Speech TTS error ({response.status}): {error}"
-                    )
-                    yield ErrorFrame(
-                        error=f"Fish Speech TTS error: {response.status} {error}"
-                    )
+                    logger.error(f"Fish Speech TTS error ({response.status}): {error}")
+                    yield ErrorFrame(error=f"TTS error: {response.status} {error}")
                     yield TTSStoppedFrame(context_id=context_id)
                     return
 
                 await self.start_tts_usage_metrics(text)
 
-                # Stream response in chunks
                 async for frame in self._stream_audio_frames_from_iterator(
                     response.content.iter_chunked(self.chunk_size),
                     strip_wav_header=True,
@@ -164,7 +114,6 @@ class FishSpeechSelfHostedTTS(TTSService):
 
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"Fish Speech TTS error: {e}")
+            yield ErrorFrame(error=f"TTS error: {e}")
         finally:
             await self.stop_ttfb_metrics()
-            logger.debug(f"{self}: Finished TTS [{text}]")

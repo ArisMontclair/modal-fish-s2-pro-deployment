@@ -1,49 +1,38 @@
-# Fish Speech S2 Pro — Local TTS Server
-# Run: docker compose --profile server up
-#
-# Prerequisites:
-#   1. mkdir -p checkpoints
-#   2. huggingface-cli download fishaudio/s2-pro --local-dir checkpoints/s2-pro
-#      (or download manually from https://huggingface.co/fishaudio/s2-pro)
-
 services:
-  fish-speech-server:
-    image: fishaudio/fish-speech:latest-server-cuda
-    profiles: ["server"]
+  # ─── Pipecat Voice Bot ──────────────────────────────────────
+  # Runs on Synology, no GPU needed. Handles WebRTC + pipeline.
+  bot:
+    build: .
+    container_name: aris-voice-bot
+    restart: unless-stopped
     ports:
-      - "8080:8080"
-    volumes:
-      - ./checkpoints:/app/checkpoints
+      - "127.0.0.1:7860:7860"
+    env_file: .env
     environment:
-      - COMPILE=1
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    command: >
-      python tools/api_server.py
-      --llama-checkpoint-path /app/checkpoints/s2-pro
-      --decoder-checkpoint-path /app/checkpoints/s2-pro/codec.pth
-      --listen 0.0.0.0:8080
-      --half
+      - BOT_PORT=7860
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7860/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  fish-speech-webui:
-    image: fishaudio/fish-speech:latest-webui-cuda
-    profiles: ["webui"]
+  # ─── Caddy Reverse Proxy ────────────────────────────────────
+  # Handles HTTPS automatically (Let's Encrypt).
+  # Replace aris.yourdomain.com with your actual domain.
+  caddy:
+    image: caddy:alpine
+    container_name: aris-caddy
+    restart: unless-stopped
     ports:
-      - "7860:7860"
+      - "80:80"
+      - "443:443"
     volumes:
-      - ./checkpoints:/app/checkpoints
-      - ./references:/app/references
-    environment:
-      - COMPILE=1
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - bot
+
+volumes:
+  caddy_data:
+  caddy_config:

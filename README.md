@@ -1,149 +1,111 @@
-# Fish S2 Pro Voice Agent (Self-Hosted)
+# Fish S2 Pro Voice Agent — Self-Hosted, Aris-Connected
 
-Real-time conversational voice AI. Talk to it like a phone call — no wake words, no typing.
+Browser-based voice AI that talks to **Aris** (OpenClaw), not a random LLM.
 
-**Pipeline:** Your voice → Whisper (STT) → Smart Turn (knows when you're done) → OpenRouter (brain) → **Self-Hosted Fish S2 Pro** (voice) → Your speakers
+**What it does:**
+- Open a URL on any device → talk to Aris with voice
+- Aris can also talk to you (proactive voice push via `/speak` endpoint)
+- Self-hosted TTS (Fish Speech S2 Pro) — zero per-character fees
+- GPU only runs on-demand via Modal — pay only when talking
 
-**Zero cloud TTS fees.** The Fish Speech S2 Pro model runs on your own GPU — no API keys, no usage limits.
-
----
+**Architecture:**
+```
+┌──────────┐     ┌───────────────────────┐     ┌──────────────────┐
+│  Browser │────▶│  Pipecat Bot          │────▶│  OpenClaw (Aris) │
+│  (phone) │◀────│  (Synology Docker)    │◀────│  (this server)   │
+└──────────┘     └───────────────────────┘     └──────────────────┘
+       WebRTC           │         │
+                        │  HTTP   │  HTTP
+                        ▼         ▼
+                 ┌────────────┐ ┌────────────────┐
+                 │  Modal GPU │ │  Modal GPU     │
+                 │  Whisper   │ │  Fish Speech   │
+                 │  (STT)     │ │  S2 Pro (TTS)  │
+                 └────────────┘ └────────────────┘
+```
 
 ## SETUP
 
-### 1. Get API Keys
+### Prerequisites
+- Synology with Docker (or any Linux server)
+- Modal account (free to sign up: https://modal.com)
+- OpenRouter API key
+- Domain with HTTPS (or use Synology's built-in reverse proxy)
 
-You only need one key:
-
-| Key | Where to get it | Free? |
-|-----|----------------|-------|
-| **OpenRouter** | https://openrouter.ai/settings/keys | Pay per use (pennies) |
-
-No Fish Audio API key needed — the TTS runs on your own infrastructure.
-
-### 2. Install
+### 1. Deploy GPU services on Modal
 
 ```bash
-git clone https://github.com/ArisMontclair/modal-fish-s2-pro-deployment.git
-cd modal-fish-s2-pro-deployment
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
+pip install modal
+modal setup
+
+# Deploy Whisper STT server
+modal deploy stt_server.py
+
+# Deploy Fish Speech TTS server
+modal deploy tts_server.py
 ```
 
-### 3. Configure
+After deploy, you'll get URLs like:
+- `https://your-org--whisper-stt-server.modal.run`
+- `https://your-org--fish-tts-server.modal.run`
+
+### 2. Configure the bot
 
 ```bash
 cp .env.example .env
 ```
 
-Open `.env` and fill in:
-
+Fill in:
 ```
-OPENROUTER_API_KEY=sk-or-v1-paste-your-key-here
-FISH_SPEECH_URL=http://localhost:8080     # or your Modal URL after deploy
+OPENROUTER_API_KEY=sk-or-v1-...
+WHISPER_STT_URL=https://your-org--whisper-stt-server.modal.run
+FISH_TTS_URL=https://your-org--fish-tts-server.modal.run
+OPENCLAW_GATEWAY_URL=http://your-server:3117
+BOT_SECRET=your-secret-for-speak-endpoint
 ```
 
-Save. Done.
-
----
-
-## USAGE
-
-### Option A: Local (needs a GPU)
-
-**Terminal 1 — Start Fish Speech TTS server:**
+### 3. Run on Synology
 
 ```bash
-# Clone and run the official Fish Speech server
-git clone https://github.com/fishaudio/fish-speech.git
-cd fish-speech
-pip install -e ".[server]"
-python tools/api_server.py \
-  --llama-checkpoint-path checkpoints/s2-pro \
-  --decoder-checkpoint-path checkpoints/s2-pro/codec.pth \
-  --listen 0.0.0.0:8080 --half
+docker compose up -d
 ```
 
-**Terminal 2 — Start the voice agent:**
-
+Or run directly:
 ```bash
-cd modal-fish-s2-pro-deployment
-source .venv/bin/activate
+pip install -e .
 python bot.py
 ```
 
-Open **http://localhost:7860** in your browser. Click Connect. Talk.
+### 4. Access from anywhere
 
-### Option B: Modal (GPU in the cloud, no local hardware needed)
+Open `https://your-domain.com` in your browser (phone, laptop, anything).
+Click Connect → talk to Aris.
 
-**1. Install Modal:**
+## SPEAKING TO YOU (Aris-initiated voice)
 
-```bash
-pip install modal
-modal setup
-```
-
-**2. Deploy the Fish Speech TTS server:**
+Aris can push voice to a connected browser via the `/speak` endpoint:
 
 ```bash
-modal deploy fish_speech_server.py
+curl -X POST http://localhost:7860/speak \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-secret" \
+  -d '{"text": "Morning John. Dominius deadline is in 2 days. How are we looking?"}'
 ```
 
-This gives you a URL like `https://your-org--fish-speech-tts-fish-speech-server.modal.run`
+The bot synthesizes via Fish Speech on Modal and plays it through the connected browser.
 
-**3. Update `.env`:**
+## COST
 
-```
-FISH_SPEECH_URL=https://your-org--fish-speech-tts-fish-speech-server.modal.run
-```
-
-**4. Deploy the bot (or run locally):**
-
-```bash
-# Either deploy to Modal...
-modal deploy bot.py
-
-# ...or run locally (connects to Modal-hosted TTS)
-python bot.py
-```
-
-**Modal costs:** ~$0.80/hour for A10G GPU. Only charged when someone is talking (with 5-min warm-up).
-
----
-
-## ARCHITECTURE
-
-```
-┌─────────────┐     ┌─────────────┐     ┌──────────────┐     ┌─────────────────────┐
-│   Browser   │────▶│   Pipecat   │────▶│   OpenRouter │     │  Fish Speech S2 Pro │
-│  (WebRTC)   │     │  Bot Agent  │     │     LLM      │     │  (Self-Hosted GPU)  │
-│  mic+speaker│◀────│  (STT+Turn) │◀────│              │────▶│    POST /v1/tts     │
-└─────────────┘     └─────────────┘     └──────────────┘     └─────────────────────┘
-                            │                                          │
-                            │            HTTP (no cloud API)           │
-                            └──────────────────────────────────────────┘
-```
-
-## CHANGELOG
-
-### v0.3.0 — Self-Hosted TTS
-- Replaced Fish Audio cloud API with self-hosted Fish Speech S2 Pro
-- Added `fish_speech_tts.py` — custom Pipecat TTS service (HTTP)
-- Added `fish_speech_server.py` — Modal deployment for TTS server
-- Removed `FISH_API_KEY` dependency
-- Added `FISH_SPEECH_URL` env var
-
-### v0.2.0 — Pipecat Rebuild
-- Full Pipecat pipeline with Smart Turn v3
-
----
+- Modal A10G GPU: ~$0.80/hour, **only when active**
+- `scaledown_window=15`: GPU shuts down 15 sec after last request
+- Typical usage (30 min/day of conversation): ~$0.40/day
+- Cold start: ~10-15 sec for first request after idle (model loading)
 
 ## TROUBLESHOOTING
 
 | Problem | Fix |
 |---------|-----|
-| "No module named pipecat" | Run `pip install -e .` again |
-| TTS connection refused | Fish Speech server not running. Check `FISH_SPEECH_URL` |
-| Slow TTS | First request downloads model (~8GB). Wait. Or use `--compile` flag |
-| Out of memory on Modal | S2 Pro needs ~12GB VRAM. A10G (24GB) is sufficient. |
-| No sound in browser | Check browser mic/speaker permissions |
+| 15 sec delay on first message | Normal — Modal loading models. Subsequent messages instant |
+| No audio in browser | Check mic/speaker permissions. Use HTTPS (required for WebRTC) |
+| `/speak` not working | Check `BOT_SECRET` matches between .env and curl command |
+| Modal timeout | First deploy downloads models (~8GB). Wait 5 min. |
