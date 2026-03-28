@@ -55,6 +55,7 @@ load_dotenv(override=True)
 # ─── Config ─────────────────────────────────────────────────────
 VOICE_SERVER_URL = os.getenv("VOICE_SERVER_URL", "http://localhost:8080")
 OPENCLAW_GATEWAY_URL = os.getenv("OPENCLAW_GATEWAY_URL", "")
+OPENCLAW_GATEWAY_TOKEN = os.getenv("OPENCLAW_GATEWAY_TOKEN", "")
 BOT_SECRET = os.getenv("BOT_SECRET", "")
 BOT_PORT = int(os.getenv("BOT_PORT", "7860"))
 LLM_MODEL = os.getenv("LLM_MODEL", "xiaomi/mimo-v2-pro")
@@ -107,7 +108,11 @@ async def query_openclaw(text: str) -> str:
             "--timeout", "30",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env={**os.environ, "OPENCLAW_GATEWAY_URL": OPENCLAW_GATEWAY_URL},
+            env={
+                **os.environ,
+                "OPENCLAW_GATEWAY_URL": OPENCLAW_GATEWAY_URL,
+                "OPENCLAW_GATEWAY_TOKEN": OPENCLAW_GATEWAY_TOKEN,
+            },
         )
         stdout, stderr = await asyncio.wait_for(result.communicate(), timeout=35)
 
