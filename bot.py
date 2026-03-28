@@ -1,48 +1,27 @@
 """
-Aris Voice Agent — Pipecat Pipeline
+Aris Voice Agent — FastAPI + Pipecat Pipeline
 Browser-based voice interface for Aris (OpenClaw).
 
-Pipeline (you talk):
-  Browser mic → Modal (Whisper STT) → text → OpenClaw (Aris) → reply text
-    → Modal (Fish Speech TTS) → Browser speaker
+Run:  python bot.py
+Open: http://localhost:7860
 """
 
 import os
 import asyncio
 import json
-from dotenv import load_dotenv
-from loguru import logger
+from contextlib import asynccontextmanager
 
 import aiohttp
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
-from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import (
-    ErrorFrame,
-    Frame,
-    LLMFullResponseEndFrame,
-    LLMFullResponseStartFrame,
-    TextFrame,
-    TranscriptionFrame,
+import uvicorn
+from dotenv import load_dotenv
+from fastapi import BackgroundTasks, FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
+from loguru import logger
+from pipecat.transports.smallwebrtc.request_handler import (
+    SmallWebRTCPatchRequest,
+    SmallWebRTCRequest,
+    SmallWebRTCRequestHandler,
 )
-from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import (
-    LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
-)
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.runner.types import RunnerArguments
-from pipecat.runner.utils import create_transport
-from pipecat.services.openrouter.llm import OpenRouterLLMService
-from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.daily.transport import DailyParams
-from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
-
-from fish_speech_tts import FishSpeechSelfHostedTTS
-from whisper_stt import WhisperRemoteSTT
 
 load_dotenv(override=True)
 
@@ -55,28 +34,13 @@ BOT_PORT = int(os.getenv("BOT_PORT", "7860"))
 LLM_MODEL = os.getenv("LLM_MODEL", "xiaomi/mimo-v2-pro")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
-# ─── Voice-optimized System Prompt ──────────────────────────────
-SYSTEM_PROMPT = """\
-You are Aris, a voice assistant built by John. You are concise, direct, and warm.
-This is a voice conversation — respond like a human would in person.
-
-Rules:
-- 1-3 sentences max. Never more unless explicitly asked to elaborate.
-- No "Great question!", no "I'd be happy to help!", no filler.
-- Match the user's energy. Casual if casual, serious if serious.
-- Use emotion tags: [excited] [whisper] [pause] [emphasis] [sigh] [laughing]
-- Be opinionated. Have a take. Direct over diplomatic.
-- If you don't know something, say so. Don't fabricate.
-- Respond in the same language the user speaks.\
-"""
+# ─── Shared HTTP session ────────────────────────────────────────
+http_session: aiohttp.ClientSession | None = None
 
 
+# ─── OpenClaw Bridge ────────────────────────────────────────────
 async def query_openclaw(text: str) -> str:
-    """Send text to OpenClaw (Aris) and get a voice-optimized response.
-
-    Returns concise text suitable for TTS, or empty string on failure.
-    Falls back to direct LLM if OpenClaw is unreachable.
-    """
+    """Send text to OpenClaw (Aris) and get a voice-optimized response."""
     if not OPENCLAW_GATEWAY_URL:
         return ""
 
@@ -120,94 +84,122 @@ async def query_openclaw(text: str) -> str:
         return ""
 
 
-class OpenClawBridge(FrameProcessor):
-    """Intercepts transcription frames, routes to OpenClaw, emits TTS-ready frames.
+# ─── Bot Pipeline ───────────────────────────────────────────────
+async def run_bot(webrtc_connection):
+    """Run the Pipecat pipeline for a single WebRTC connection."""
+    from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import (
+        LocalSmartTurnAnalyzerV3,
+    )
+    from pipecat.audio.vad.silero import SileroVADAnalyzer
+    from pipecat.frames.frames import (
+        Frame,
+        LLMFullResponseEndFrame,
+        LLMFullResponseStartFrame,
+        TextFrame,
+        TranscriptionFrame,
+    )
+    from pipecat.pipeline.pipeline import Pipeline
+    from pipecat.pipeline.runner import PipelineRunner
+    from pipecat.pipeline.task import PipelineParams, PipelineTask
+    from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+    from pipecat.services.openrouter.llm import OpenRouterLLMService
+    from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
+    from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+    from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
-    Pipeline: STT → [TranscriptionFrame] → OpenClawBridge → [TextFrame] → TTS
-    """
+    from fish_speech_tts import FishSpeechSelfHostedTTS
+    from whisper_stt import WhisperRemoteSTT
 
-    def __init__(self):
-        super().__init__()
-        self._use_openclaw = bool(OPENCLAW_GATEWAY_URL)
+    global http_session
+    if http_session is None:
+        http_session = aiohttp.ClientSession()
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
+    transport = SmallWebRTCTransport(
+        webrtc_connection=webrtc_connection,
+        params=SmallWebRTCTransport.Params(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            audio_in_sample_rate=16000,
+            audio_out_sample_rate=24000,
+        ),
+    )
 
-        if isinstance(frame, TranscriptionFrame) and self._use_openclaw:
-            text = frame.text.strip()
-            if not text:
-                return
+    stt = WhisperRemoteSTT(
+        base_url=VOICE_SERVER_URL,
+        aiohttp_session=http_session,
+        language="",
+    )
 
-            logger.info(f"→ OpenClaw: [{text}]")
+    llm = OpenRouterLLMService(
+        api_key=OPENROUTER_API_KEY,
+        model=LLM_MODEL,
+        system_instruction=(
+            "You are Aris, a voice assistant built by John. "
+            "You are concise, direct, and warm. "
+            "1-3 sentences max. No filler. Be opinionated. "
+            "Use emotion tags: [excited] [whisper] [pause] [emphasis] [sigh]. "
+            "Match the user's language."
+        ),
+    )
 
-            response = await query_openclaw(text)
+    tts = FishSpeechSelfHostedTTS(
+        base_url=VOICE_SERVER_URL,
+        aiohttp_session=http_session,
+        reference_id=os.getenv("FISH_VOICE_ID", ""),
+    )
 
-            if response:
-                logger.info(f"← OpenClaw: [{response}]")
-                # These frames trigger TTS in the pipeline
-                await self.push_frame(LLMFullResponseStartFrame())
-                await self.push_frame(TextFrame(text=response))
-                await self.push_frame(LLMFullResponseEndFrame())
+    # ─── OpenClaw Bridge Processor ──────────────────────────────
+    class OpenClawBridge(FrameProcessor):
+        def __init__(self):
+            super().__init__()
+            self._use_openclaw = bool(OPENCLAW_GATEWAY_URL)
+
+        async def process_frame(self, frame: Frame, direction: FrameDirection):
+            await super().process_frame(frame, direction)
+
+            if isinstance(frame, TranscriptionFrame) and self._use_openclaw:
+                text = frame.text.strip()
+                if not text:
+                    return
+
+                logger.info(f"→ OpenClaw: [{text}]")
+                response = await query_openclaw(text)
+
+                if response:
+                    logger.info(f"← OpenClaw: [{response}]")
+                    await self.push_frame(LLMFullResponseStartFrame())
+                    await self.push_frame(TextFrame(text=response))
+                    await self.push_frame(LLMFullResponseEndFrame())
+                else:
+                    logger.warning("OpenClaw unavailable")
+                    await self.push_frame(LLMFullResponseStartFrame())
+                    await self.push_frame(
+                        TextFrame(text="Sorry, I couldn't reach my brain. Try again.")
+                    )
+                    await self.push_frame(LLMFullResponseEndFrame())
             else:
-                # OpenClaw failed — speak an error rather than silence
-                logger.warning("OpenClaw unavailable, speaking fallback")
-                await self.push_frame(LLMFullResponseStartFrame())
-                await self.push_frame(TextFrame(text="Sorry, I couldn't reach my brain. Try again."))
-                await self.push_frame(LLMFullResponseEndFrame())
-        else:
-            await self.push_frame(frame, direction)
+                await self.push_frame(frame, direction)
 
+    bridge = OpenClawBridge()
 
-# ─── Transport Config ──────────────────────────────────────────
-transport_params = {
-    "daily": lambda: DailyParams(
-        audio_in_enabled=True,
-        audio_out_enabled=True,
-        audio_in_sample_rate=16000,
-        audio_out_sample_rate=24000,
-    ),
-    "webrtc": lambda: TransportParams(
-        audio_in_enabled=True,
-        audio_out_enabled=True,
-        audio_in_sample_rate=16000,
-        audio_out_sample_rate=24000,
-    ),
-}
-
-
-async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    """Main Pipecat pipeline."""
-
-    session = aiohttp.ClientSession()
-
-    try:
-        # ─── STT: Remote Whisper (Modal GPU) ────────────────────────
-        stt = WhisperRemoteSTT(
-            base_url=VOICE_SERVER_URL,
-            aiohttp_session=session,
-            language="",
+    # ─── Build Pipeline ─────────────────────────────────────────
+    if OPENCLAW_GATEWAY_URL:
+        pipeline = Pipeline([
+            transport.input(),
+            stt,
+            bridge,
+            tts,
+            transport.output(),
+        ])
+    else:
+        from pipecat.processors.aggregators.llm_context import LLMContext
+        from pipecat.processors.aggregators.llm_response_universal import (
+            LLMContextAggregatorPair,
+            LLMUserAggregatorParams,
         )
 
-        # ─── LLM: OpenRouter (fallback when OpenClaw unavailable) ──
-        llm = OpenRouterLLMService(
-            api_key=OPENROUTER_API_KEY,
-            model=LLM_MODEL,
-            system_instruction=SYSTEM_PROMPT,
-        )
-
-        # ─── OpenClaw Bridge ───────────────────────────────────────
-        bridge = OpenClawBridge()
-
-        # ─── TTS: Self-Hosted Fish Speech (Modal GPU) ──────────────
-        tts = FishSpeechSelfHostedTTS(
-            base_url=VOICE_SERVER_URL,
-            aiohttp_session=session,
-            reference_id=os.getenv("FISH_VOICE_ID", ""),
-        )
-
-        # ─── Context + Smart Turn ──────────────────────────────────
         context = LLMContext()
-        user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        user_agg, assistant_agg = LLMContextAggregatorPair(
             context,
             user_params=LLMUserAggregatorParams(
                 user_turn_strategies=UserTurnStrategies(
@@ -221,63 +213,121 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             ),
         )
 
-        # ─── Pipeline ──────────────────────────────────────────────
-        # When OpenClaw is configured:
-        #   STT → bridge (intercepts, calls OpenClaw) → TTS → output
-        # When OpenClaw is NOT configured:
-        #   STT → aggregator → LLM (OpenRouter) → TTS → output
-        if OPENCLAW_GATEWAY_URL:
-            pipeline = Pipeline([
-                transport.input(),
-                stt,
-                bridge,          # OpenClaw intercepts here
-                tts,
-                transport.output(),
-            ])
-        else:
-            pipeline = Pipeline([
-                transport.input(),
-                stt,
-                user_aggregator,
-                llm,
-                tts,
-                transport.output(),
-                assistant_aggregator,
-            ])
+        pipeline = Pipeline([
+            transport.input(),
+            stt,
+            user_agg,
+            llm,
+            tts,
+            transport.output(),
+            assistant_agg,
+        ])
 
-        task = PipelineTask(
-            pipeline,
-            params=PipelineParams(
-                enable_metrics=True,
-                enable_usage_metrics=True,
-            ),
-            idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
+    )
+
+    @transport.event_handler("on_client_connected")
+    async def on_connected(transport, connection):
+        logger.info("Client connected — ready to talk")
+
+    @transport.event_handler("on_client_disconnected")
+    async def on_disconnected(transport, connection):
+        logger.info("Client disconnected")
+        await task.cancel()
+
+    runner = PipelineRunner()
+    await runner.run(task)
+
+
+# ─── FastAPI Server ─────────────────────────────────────────────
+webrtc_handler = SmallWebRTCRequestHandler()
+
+
+app = FastAPI(title="Aris Voice Agent")
+
+
+@app.post("/api/offer")
+async def offer(request: SmallWebRTCRequest, background_tasks: BackgroundTasks):
+    async def callback(connection):
+        background_tasks.add_task(run_bot, connection)
+
+    return await webrtc_handler.handle_web_request(request, callback)
+
+
+@app.patch("/api/offer")
+async def ice_candidate(request: SmallWebRTCPatchRequest):
+    await webrtc_handler.handle_patch_request(request)
+    return {"status": "success"}
+
+
+# ─── Health Checks ──────────────────────────────────────────────
+@app.get("/api/health/modal")
+async def health_modal():
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.get(
+                f"{VOICE_SERVER_URL}/health",
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as resp:
+                data = await resp.json()
+                return {"status": data.get("status", "unknown")}
+    except Exception as e:
+        return {"status": "unreachable", "error": str(e)}
+
+
+@app.get("/api/health/openclaw")
+async def health_openclaw():
+    if not OPENCLAW_GATEWAY_URL:
+        return {"status": "not_configured"}
+    try:
+        result = await asyncio.create_subprocess_exec(
+            "openclaw", "health",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env={
+                **os.environ,
+                "OPENCLAW_GATEWAY_URL": OPENCLAW_GATEWAY_URL,
+                "OPENCLAW_GATEWAY_TOKEN": OPENCLAW_GATEWAY_TOKEN,
+            },
         )
-
-        # ─── Event Handlers ────────────────────────────────────────
-        @transport.event_handler("on_client_connected")
-        async def on_client_connected(transport, client):
-            logger.info("Client connected — ready to talk")
-
-        @transport.event_handler("on_client_disconnected")
-        async def on_client_disconnected(transport, client):
-            logger.info("Client disconnected")
-            await task.cancel()
-
-        # ─── Run ───────────────────────────────────────────────────
-        runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
-        await runner.run(task)
-
-    finally:
-        await session.close()
+        stdout, _ = await asyncio.wait_for(result.communicate(), timeout=10)
+        return {"status": "connected" if result.returncode == 0 else "error"}
+    except Exception:
+        return {"status": "unreachable"}
 
 
-async def bot(runner_args: RunnerArguments):
-    """Entry point for Pipecat runner."""
-    transport = await create_transport(runner_args, transport_params)
-    await run_bot(transport, runner_args)
+# ─── Dashboard ──────────────────────────────────────────────────
+@app.get("/")
+async def dashboard():
+    return FileResponse("dashboard.html")
 
 
+@asynccontextmanager
+async def lifespan(app):
+    global http_session
+    http_session = aiohttp.ClientSession()
+    yield
+    await http_session.close()
+    await webrtc_handler.close()
+
+
+app.router.lifespan_context = lifespan
+
+
+# ─── Main ───────────────────────────────────────────────────────
 if __name__ == "__main__":
-    from pipecat.runner.run import main
-    main()
+    import sys
+
+    logger.remove(0)
+    logger.add(sys.stderr, level="DEBUG")
+
+    logger.info(f"Modal server: {VOICE_SERVER_URL}")
+    logger.info(f"OpenClaw: {OPENCLAW_GATEWAY_URL or 'not configured'}")
+    logger.info(f"Starting Aris Voice Agent on port {BOT_PORT}...")
+
+    uvicorn.run(app, host="0.0.0.0", port=BOT_PORT)

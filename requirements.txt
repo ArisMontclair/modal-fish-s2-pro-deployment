@@ -1,5 +1,6 @@
-pipecat-ai[whisper,openrouter,daily,silero,local-smart-turn]>=0.0.70
+pipecat-ai[webrtc,whisper,openrouter,silero,local-smart-turn]>=0.0.70
 aiohttp>=3.9.0
-aiohttp-jinja2>=1.5
+fastapi>=0.115.0
+uvicorn>=0.30.0
 python-dotenv>=1.0
 loguru>=0.7

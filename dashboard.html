@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Aris — Voice</title>
+    <style>
+        :root {
+            --bg: #0a0a0f;
+            --card: #13131a;
+            --border: #2a2a3a;
+            --text: #e4e4ef;
+            --dim: #6a6a8a;
+            --green: #22c55e;
+            --red: #ef4444;
+            --yellow: #eab308;
+            --blue: #3b82f6;
+            --purple: #a855f7;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, var(--purple), var(--blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .header p {
+            color: var(--dim);
+            font-size: 13px;
+            margin-top: 4px;
+        }
+
+        /* Status Cards */
+        .status-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 8px;
+            width: 100%;
+            max-width: 400px;
+            margin-bottom: 20px;
+        }
+        .status-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 12px 8px;
+            text-align: center;
+        }
+        .status-card .label {
+            font-size: 10px;
+            color: var(--dim);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--dim);
+            display: inline-block;
+            margin-right: 4px;
+            transition: background 0.3s;
+        }
+        .status-dot.ok { background: var(--green); box-shadow: 0 0 8px var(--green); }
+        .status-dot.err { background: var(--red); box-shadow: 0 0 8px var(--red); }
+        .status-dot.wait { background: var(--yellow); box-shadow: 0 0 8px var(--yellow); }
+        .status-card .value {
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        /* Connect Button */
+        .connect-area {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+        #connect-btn {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            border: 3px solid var(--border);
+            background: var(--card);
+            color: var(--text);
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #connect-btn:hover {
+            border-color: var(--purple);
+            transform: scale(1.05);
+        }
+        #connect-btn:active { transform: scale(0.95); }
+        #connect-btn.connected {
+            border-color: var(--green);
+            background: rgba(34, 197, 94, 0.1);
+        }
+        #connect-btn.connecting {
+            border-color: var(--yellow);
+            animation: pulse 1.5s infinite;
+        }
+        #connect-btn .icon { font-size: 32px; }
+        #connect-btn .text { font-size: 11px; color: var(--dim); }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Connection status */
+        #connection-status {
+            font-size: 12px;
+            color: var(--dim);
+            margin-top: 8px;
+        }
+
+        /* Config Panel */
+        .config-panel {
+            width: 100%;
+            max-width: 400px;
+            margin-bottom: 16px;
+        }
+        .config-toggle {
+            font-size: 12px;
+            color: var(--dim);
+            cursor: pointer;
+            text-align: center;
+            padding: 8px;
+            user-select: none;
+        }
+        .config-toggle:hover { color: var(--text); }
+        .config-fields {
+            display: none;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .config-fields.open { display: flex; }
+        .field {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 12px;
+        }
+        .field label {
+            font-size: 10px;
+            color: var(--dim);
+            text-transform: uppercase;
+            display: block;
+            margin-bottom: 4px;
+        }
+        .field input {
+            width: 100%;
+            background: none;
+            border: none;
+            color: var(--text);
+            font-size: 13px;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            outline: none;
+        }
+        .field input::placeholder { color: var(--dim); opacity: 0.5; }
+
+        /* Log Panel */
+        .log-panel {
+            width: 100%;
+            max-width: 400px;
+        }
+        .log-header {
+            font-size: 12px;
+            color: var(--dim);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 8px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .log-header button {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--dim);
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .log-header button:hover { color: var(--text); border-color: var(--dim); }
+        #log-container {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 11px;
+            line-height: 1.6;
+        }
+        .log-entry { color: var(--dim); }
+        .log-entry.info { color: var(--text); }
+        .log-entry.success { color: var(--green); }
+        .log-entry.error { color: var(--red); }
+        .log-entry.warn { color: var(--yellow); }
+
+        /* Audio */
+        audio { display: none; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>⚜️ Aris</h1>
+        <p>Voice Agent</p>
+    </div>
+
+    <!-- Status Cards -->
+    <div class="status-grid">
+        <div class="status-card">
+            <div class="label">Modal GPU</div>
+            <div><span class="status-dot" id="dot-modal"></span></div>
+            <div class="value" id="status-modal">—</div>
+        </div>
+        <div class="status-card">
+            <div class="label">OpenClaw</div>
+            <div><span class="status-dot" id="dot-openclaw"></span></div>
+            <div class="value" id="status-openclaw">—</div>
+        </div>
+        <div class="status-card">
+            <div class="label">WebRTC</div>
+            <div><span class="status-dot" id="dot-webrtc"></span></div>
+            <div class="value" id="status-webrtc">—</div>
+        </div>
+    </div>
+
+    <!-- Connect Button -->
+    <div class="connect-area">
+        <button id="connect-btn">
+            <span class="icon">🎙️</span>
+            <span class="text">Connect</span>
+        </button>
+        <div id="connection-status">Tap to start</div>
+    </div>
+
+    <!-- Config Panel -->
+    <div class="config-panel">
+        <div class="config-toggle" id="config-toggle">⚙️ Settings</div>
+        <div class="config-fields" id="config-fields">
+            <div class="field">
+                <label>Modal Server URL</label>
+                <input type="text" id="cfg-modal" placeholder="https://xxx.modal.run" />
+            </div>
+            <div class="field">
+                <label>OpenClaw Gateway</label>
+                <input type="text" id="cfg-openclaw" placeholder="ws://192.168.x.x:18789" />
+            </div>
+            <div class="field">
+                <label>Bot Secret</label>
+                <input type="password" id="cfg-secret" placeholder="for /speak endpoint" />
+            </div>
+        </div>
+    </div>
+
+    <!-- Log Panel -->
+    <div class="log-panel">
+        <div class="log-header">
+            <span>Log</span>
+            <button id="log-clear">Clear</button>
+        </div>
+        <div id="log-container"></div>
+    </div>
+
+    <audio id="audio-el" autoplay></audio>
+
+    <script>
+        const btn = document.getElementById('connect-btn');
+        const statusEl = document.getElementById('connection-status');
+        const audioEl = document.getElementById('audio-el');
+        const logContainer = document.getElementById('log-container');
+        const configToggle = document.getElementById('config-toggle');
+        const configFields = document.getElementById('config-fields');
+
+        let connected = false;
+        let peerConnection = null;
+
+        // ─── Logging ────────────────────────────────────────────
+        function log(msg, level = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${level}`;
+            const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
+            entry.textContent = `[${time}] ${msg}`;
+            logContainer.appendChild(entry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        document.getElementById('log-clear').addEventListener('click', () => {
+            logContainer.innerHTML = '';
+        });
+
+        // ─── Config toggle ──────────────────────────────────────
+        configToggle.addEventListener('click', () => {
+            configFields.classList.toggle('open');
+        });
+
+        // ─── Status dots ────────────────────────────────────────
+        function setStatus(service, state, text) {
+            const dot = document.getElementById(`dot-${service}`);
+            const label = document.getElementById(`status-${service}`);
+            dot.className = 'status-dot ' + (state === 'ok' ? 'ok' : state === 'err' ? 'err' : 'wait');
+            label.textContent = text;
+        }
+
+        // ─── Health checks ──────────────────────────────────────
+        async function checkHealth() {
+            // Modal GPU
+            try {
+                const resp = await fetch('/api/health/modal');
+                const data = await resp.json();
+                if (data.status === 'ready') {
+                    setStatus('modal', 'ok', 'Ready');
+                    log('Modal GPU: ready', 'success');
+                } else if (data.status === 'loading') {
+                    setStatus('modal', 'wait', 'Loading...');
+                    log('Modal GPU: loading models...', 'warn');
+                } else {
+                    setStatus('modal', 'err', 'Down');
+                    log('Modal GPU: unreachable', 'error');
+                }
+            } catch (e) {
+                setStatus('modal', 'err', 'Error');
+                log('Modal GPU: ' + e.message, 'error');
+            }
+
+            // OpenClaw
+            try {
+                const resp = await fetch('/api/health/openclaw');
+                const data = await resp.json();
+                if (data.status === 'connected') {
+                    setStatus('openclaw', 'ok', 'Aris');
+                    log('OpenClaw: connected to Aris', 'success');
+                } else {
+                    setStatus('openclaw', 'err', 'Offline');
+                    log('OpenClaw: not configured or unreachable', 'warn');
+                }
+            } catch (e) {
+                setStatus('openclaw', 'err', 'Error');
+                log('OpenClaw: ' + e.message, 'error');
+            }
+        }
+
+        // ─── WebRTC Connection ──────────────────────────────────
+        async function sendIceCandidate(pc, candidate) {
+            await fetch('/api/offer', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    pc_id: pc.pc_id,
+                    candidates: [{
+                        candidate: candidate.candidate,
+                        sdp_mid: candidate.sdpMid,
+                        sdp_mline_index: candidate.sdpMLineIndex
+                    }]
+                })
+            });
+        }
+
+        async function createConnection(audioTrack) {
+            const config = {
+                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            };
+            const pc = new RTCPeerConnection(config);
+            pc.pendingIceCandidates = [];
+            pc.canSendIceCandidates = false;
+
+            pc.ontrack = e => audioEl.srcObject = e.streams[0];
+
+            pc.oniceconnectionstatechange = () => {
+                log('ICE: ' + pc.iceConnectionState);
+            };
+
+            pc.onconnectionstatechange = () => {
+                const state = pc.connectionState;
+                log('WebRTC: ' + state, state === 'connected' ? 'success' : 'info');
+                if (state === 'connected') {
+                    onConnected();
+                } else if (state === 'disconnected' || state === 'failed') {
+                    onDisconnected();
+                }
+            };
+
+            pc.onicecandidate = async (event) => {
+                if (event.candidate) {
+                    if (pc.canSendIceCandidates && pc.pc_id) {
+                        await sendIceCandidate(pc, event.candidate);
+                    } else {
+                        pc.pendingIceCandidates.push(event.candidate);
+                    }
+                }
+            };
+
+            pc.addTransceiver(audioTrack, { direction: 'sendrecv' });
+            pc.addTransceiver('video', { direction: 'sendrecv' });
+
+            await pc.setLocalDescription(await pc.createOffer());
+
+            log('Connecting to Aris...');
+            const response = await fetch('/api/offer', {
+                body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type }),
+                headers: { 'Content-Type': 'application/json' },
+                method: 'POST',
+            });
+
+            const answer = await response.json();
+            pc.pc_id = answer.pc_id;
+            await pc.setRemoteDescription(answer);
+
+            pc.canSendIceCandidates = true;
+            for (const c of pc.pendingIceCandidates) {
+                await sendIceCandidate(pc, c);
+            }
+            pc.pendingIceCandidates = [];
+
+            return pc;
+        }
+
+        async function connect() {
+            onConnecting();
+            try {
+                log('Requesting microphone access...');
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                log('Mic access granted', 'success');
+                peerConnection = await createConnection(stream.getAudioTracks()[0]);
+            } catch (e) {
+                log('Connect failed: ' + e.message, 'error');
+                onDisconnected();
+            }
+        }
+
+        function disconnect() {
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            onDisconnected();
+        }
+
+        function onConnecting() {
+            btn.className = 'connecting';
+            btn.innerHTML = '<span class="icon">⏳</span><span class="text">Connecting</span>';
+            statusEl.textContent = 'Establishing connection...';
+            setStatus('webrtc', 'wait', 'Connecting');
+            connected = true;
+        }
+
+        function onConnected() {
+            btn.className = 'connected';
+            btn.innerHTML = '<span class="icon">🔴</span><span class="text">Disconnect</span>';
+            statusEl.textContent = 'Connected — speak to Aris';
+            setStatus('webrtc', 'ok', 'Live');
+            connected = true;
+        }
+
+        function onDisconnected() {
+            btn.className = '';
+            btn.innerHTML = '<span class="icon">🎙️</span><span class="text">Connect</span>';
+            statusEl.textContent = 'Tap to start';
+            setStatus('webrtc', '', '—');
+            connected = false;
+        }
+
+        btn.addEventListener('click', () => {
+            if (!connected) {
+                connect();
+            } else {
+                disconnect();
+            }
+        });
+
+        // ─── Init ───────────────────────────────────────────────
+        log('Aris Voice Agent loaded');
+        checkHealth();
+
+        // Poll health every 30s
+        setInterval(checkHealth, 30000);
+    </script>
+</body>
+</html>
