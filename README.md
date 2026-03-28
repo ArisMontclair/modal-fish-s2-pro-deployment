@@ -85,24 +85,32 @@ https://your-org--aris-voice-server.modal.run
 cp .env.example .env
 ```
 
-Edit `.env` — you need to fill in **4 things**:
+Edit `.env` — fill in **3 things**:
 
 ```bash
-# 1. Your OpenRouter API key (get one at https://openrouter.ai)
-OPENROUTER_API_KEY=sk-or-v1-xxxxx
-
-# 2. The Modal URL from step 1
+# 1. The Modal URL from step 1
 VOICE_SERVER_URL=https://your-org--aris-voice-server.modal.run
 
-# 3. This server's gateway (Aris's brain)
+# 2. Your OpenClaw gateway (Aris's brain)
 OPENCLAW_GATEWAY_URL=ws://192.168.178.134:18789
 OPENCLAW_GATEWAY_TOKEN=REDACTED
 
-# 4. A random secret (for the /speak endpoint)
+# 3. A random secret (for the /speak endpoint)
 BOT_SECRET=whatever-you-want
 ```
 
-Everything else can stay as-is.
+**That's it.** When `OPENCLAW_GATEWAY_URL` is set, all LLM logic goes through OpenClaw. No API keys needed.
+
+<details>
+<summary>Direct LLM mode (no OpenClaw)</summary>
+
+If you want to run without OpenClaw, leave `OPENCLAW_GATEWAY_URL` empty and add:
+```bash
+OPENROUTER_API_KEY=sk-or-v1-xxxxx
+LLM_MODEL=xiaomi/mimo-v2-pro
+```
+This uses OpenRouter directly — no memory, no tools, no coaching. Just a raw LLM.
+</details>
 
 ### Step 3: Run on Synology
 
@@ -184,5 +192,5 @@ You only pay when you're actively talking.
 | No mic access | Browser requires HTTPS | Set up Caddy with a domain, or use Chrome flag for local testing. |
 | Modal GPU shows red | Server URL wrong or models still loading | Check `VOICE_SERVER_URL` in `.env`. Check `/health` endpoint. |
 | OpenClaw shows red | Gateway unreachable from Docker | Check `OPENCLAW_GATEWAY_URL`. Make sure the server is on the same network. |
-| Bot crashes on startup | Missing env vars | Check `.env` — all 4 required values must be set. |
+| Bot crashes on startup | Missing env vars | Check `.env` — `VOICE_SERVER_URL`, `OPENCLAW_GATEWAY_URL`, and `OPENCLAW_GATEWAY_TOKEN` must be set. |
 | Docker build fails | Network issue | Run `docker compose build --no-cache` |

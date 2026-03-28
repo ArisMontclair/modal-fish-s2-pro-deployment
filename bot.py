@@ -87,10 +87,6 @@ async def query_openclaw(text: str) -> str:
 # ─── Bot Pipeline ───────────────────────────────────────────────
 async def run_bot(webrtc_connection):
     """Run the Pipecat pipeline for a single WebRTC connection."""
-    from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import (
-        LocalSmartTurnAnalyzerV3,
-    )
-    from pipecat.audio.vad.silero import SileroVADAnalyzer
     from pipecat.frames.frames import (
         Frame,
         LLMFullResponseEndFrame,
@@ -102,10 +98,7 @@ async def run_bot(webrtc_connection):
     from pipecat.pipeline.runner import PipelineRunner
     from pipecat.pipeline.task import PipelineParams, PipelineTask
     from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-    from pipecat.services.openrouter.llm import OpenRouterLLMService
     from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
-    from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
-    from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
     from fish_speech_tts import FishSpeechSelfHostedTTS
     from whisper_stt import WhisperRemoteSTT
@@ -128,18 +121,6 @@ async def run_bot(webrtc_connection):
         base_url=VOICE_SERVER_URL,
         aiohttp_session=http_session,
         language="",
-    )
-
-    llm = OpenRouterLLMService(
-        api_key=OPENROUTER_API_KEY,
-        model=LLM_MODEL,
-        system_instruction=(
-            "You are Aris, a voice assistant built by John. "
-            "You are concise, direct, and warm. "
-            "1-3 sentences max. No filler. Be opinionated. "
-            "Use emotion tags: [excited] [whisper] [pause] [emphasis] [sigh]. "
-            "Match the user's language."
-        ),
     )
 
     tts = FishSpeechSelfHostedTTS(
@@ -192,10 +173,29 @@ async def run_bot(webrtc_connection):
             transport.output(),
         ])
     else:
+        from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import (
+            LocalSmartTurnAnalyzerV3,
+        )
+        from pipecat.audio.vad.silero import SileroVADAnalyzer
         from pipecat.processors.aggregators.llm_context import LLMContext
         from pipecat.processors.aggregators.llm_response_universal import (
             LLMContextAggregatorPair,
             LLMUserAggregatorParams,
+        )
+        from pipecat.services.openrouter.llm import OpenRouterLLMService
+        from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+        from pipecat.turns.user_turn_strategies import UserTurnStrategies
+
+        llm = OpenRouterLLMService(
+            api_key=OPENROUTER_API_KEY,
+            model=LLM_MODEL,
+            system_instruction=(
+                "You are Aris, a voice assistant built by John. "
+                "You are concise, direct, and warm. "
+                "1-3 sentences max. No filler. Be opinionated. "
+                "Use emotion tags: [excited] [whisper] [pause] [emphasis] [sigh]. "
+                "Match the user's language."
+            ),
         )
 
         context = LLMContext()
