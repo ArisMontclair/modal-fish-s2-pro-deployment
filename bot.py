@@ -103,7 +103,7 @@ async def run_bot(webrtc_connection):
     from pipecat.pipeline.runner import PipelineRunner
     from pipecat.pipeline.task import PipelineParams, PipelineTask
     from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-    from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
+    from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport, TransportParams
 
     from orpheus_tts import OrpheusTTS
     from whisper_stt import WhisperRemoteSTT
@@ -114,7 +114,7 @@ async def run_bot(webrtc_connection):
 
     transport = SmallWebRTCTransport(
         webrtc_connection=webrtc_connection,
-        params=SmallWebRTCTransport.Params(
+        params=TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
             audio_in_sample_rate=16000,
