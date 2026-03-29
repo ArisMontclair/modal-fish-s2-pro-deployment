@@ -18,8 +18,8 @@ image = (
         add_python="3.12",
     )
     .apt_install("git", "ffmpeg", "clang", "libportaudio2", "portaudio19-dev")
-    .pip_install("faster-whisper")
-    .run_commands("git clone --depth 1 https://github.com/fishaudio/fish-speech.git /app/fish-speech")
+    .uv_pip_install("faster-whisper==1.1.1")
+    .run_commands("git clone --depth 1 --branch v2.0.0 https://github.com/fishaudio/fish-speech.git /app/fish-speech")
     .workdir("/app/fish-speech")
     .run_commands("pip install -e '.[server]'")
     # Patch: fish-speech torchaudio circular import bug with torch 2.8
@@ -56,7 +56,7 @@ print('Patched reference_loader.py')
 """
     )
     .workdir("/app")
-    .pip_install("fastapi", "uvicorn", "httpx")
+    .uv_pip_install("fastapi", "uvicorn", "httpx")
     .run_commands("huggingface-cli download fishaudio/s2-pro --local-dir /models/s2-pro")
 )
 
