@@ -11,7 +11,7 @@ COPY --from=openclaw /usr/local/bin/openclaw /usr/local/bin/openclaw
 
 # Install system deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
+    curl libxcb1 libx11-6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python deps (+ modal for auto-deploy)
