@@ -20,8 +20,8 @@ RUN pip install --no-cache-dir -r requirements.txt modal
 
 # Copy application
 COPY . .
-RUN chmod +x entrypoint.sh
+RUN sed -i 's/\r$//' entrypoint.sh && chmod +x entrypoint.sh
 
 EXPOSE 7860
 
-ENTRYPOINT ["./entrypoint.sh"]
+ENTRYPOINT ["bash", "./entrypoint.sh"]

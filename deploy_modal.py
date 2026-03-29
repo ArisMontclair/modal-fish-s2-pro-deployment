@@ -25,7 +25,7 @@ def deploy():
 
     print("Deploying GPU server to Modal (this may take 10-15 min on first run)...")
     result = subprocess.run(
-        ["modal", "deploy", "--yes", "server.py"],
+        ["modal", "deploy", "server.py"],
         capture_output=True,
         text=True,
         env=env,
@@ -38,9 +38,15 @@ def deploy():
 
     print(result.stdout)
 
-    # Extract URL from output
-    # Typical output: "Created deployment aris-voice.\n✓ App deployed at https://xxx--aris-voice-server.modal.run"
-    url_match = re.search(r"https://\S+\.modal\.run", result.stdout)
+    # Extract server URL from output (skip health endpoint, get the actual server URL)
+    # Output has lines like:
+    #   ├── 🔨 Created web function health => https://xxx--health.modal.run
+    #   └── 🔨 Created web function server =>\nhttps://xxx--aris-voice-server.modal.run
+    url_match = re.search(r"server\s*=>\s*\n?\s*(https://\S+\.modal\.run)", result.stdout)
+    if not url_match:
+        # Fallback: grab last URL (usually the server, not health)
+        all_urls = re.findall(r"https://\S+\.modal\.run", result.stdout)
+        url_match = type('obj', (object,), {'group': lambda self, n=0: all_urls[-1] if all_urls else None})()
     if url_match:
         url = url_match.group(0)
         print(f"\nVOICE_SERVER_URL={url}")

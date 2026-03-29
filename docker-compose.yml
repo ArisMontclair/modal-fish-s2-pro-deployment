@@ -1,7 +1,7 @@
 services:
   # ─── Pipecat Voice Bot ──────────────────────────────────────
-  # Runs on Synology, no GPU needed. Handles WebRTC + pipeline.
-  # Needs OpenClaw CLI to talk to Aris on your server.
+  # Runs on your server, no GPU needed. Handles WebRTC + pipeline.
+  # Route your existing reverse proxy (Coolify/Dokploy/Caddy) to port 7860.
   bot:
     build: .
     container_name: aris-voice-bot
@@ -16,24 +16,3 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-
-  # ─── Caddy Reverse Proxy ────────────────────────────────────
-  # Handles HTTPS automatically (Let's Encrypt).
-  # Point your domain's DNS to this Synology's IP.
-  caddy:
-    image: caddy:alpine
-    container_name: aris-caddy
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - bot
-
-volumes:
-  caddy_data:
-  caddy_config:
