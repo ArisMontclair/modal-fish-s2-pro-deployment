@@ -2,7 +2,7 @@
 
 Talk to OpenClaw from any browser. Phone, laptop, anything.
 
-Open the page → tap Connect → speak → Aris responds with voice.
+Open the page → tap Connect → speak → OpenClaw responds with voice.
 
 **What this does:**
 - You talk into your browser → OpenClaw hears you and responds with voice
@@ -29,17 +29,17 @@ Open the page → tap Connect → speak → Aris responds with voice.
 
 ```
 You (iPhone browser)
-    ↕  WebRTC (your voice goes up, Aris's voice comes down)
+    ↕  WebRTC (your voice goes up, your agent's voice comes down)
 Synology (this repo)
     ├── Bot (handles WebRTC, pipeline)
     └── Caddy (HTTPS)
     ↕  HTTP (text + audio)
 Modal GPU (cloud, on-demand)
     ├── Whisper large-v3 → turns your voice into text
-    └── Fish Speech S2 Pro → turns Aris's text into voice
+    └── Fish Speech S2 Pro → turns your agent's text into voice
     ↕  HTTP (text)
 This server (OpenClaw's brain)
-    └── Aris → memory, tools, coaching, personality
+    └── OpenClaw → memory, tools, coaching, personality
 ```
 
 When you speak:
@@ -115,7 +115,7 @@ Edit `.env` — fill in **3 things**:
 MODAL_TOKEN_ID=your-token-id
 MODAL_TOKEN_SECRET=your-token-secret
 
-# 2. Your OpenClaw gateway (Aris's brain)
+# 2. Your OpenClaw gateway (your agent's brain)
 OPENCLAW_GATEWAY_URL=ws://your-server:18789
 OPENCLAW_GATEWAY_TOKEN=your-token-here
 ```
@@ -186,7 +186,7 @@ When you open the page, you see:
   - 🟢 Green = working
   - 🟡 Yellow = loading/connecting
   - 🔴 Red = down/unreachable
-- **Big connect button** — tap to start talking to Aris
+- **Big connect button** — tap to start talking to OpenClaw
 - **Settings panel** — tap ⚙️ to expand, edit URLs without restarting Docker
 - **Log panel** — timestamped events for troubleshooting
 
@@ -212,7 +212,7 @@ You only pay when the GPU is actually running.
 
 ## /speak — Push Voice to Connected Browsers
 
-Aris (or any service) can push voice messages to all connected browsers via the `/speak` endpoint.
+OpenClaw (or any service) can push voice messages to all connected browsers via the `/speak` endpoint.
 
 ```bash
 curl -X POST https://your-domain/speak \
@@ -233,7 +233,7 @@ The text gets converted to speech via Fish Speech on Modal, then pushed through 
 | Cold start delay (60-120s) | Modal loading models from image | Normal after idle. Subsequent requests are instant within 5 min. |
 | No mic access | Browser requires HTTPS | Set up Caddy with a domain, or use Chrome flag for local testing. |
 | Modal GPU shows red | Server URL wrong or models still loading | Check `VOICE_SERVER_URL` in `.env`. Wait for cold start. |
-| TTS returns 503 | Fish Speech failed preflight | Check Modal logs: `modal app logs aris-voice`. Look for `FATAL:` messages. |
+| TTS returns 503 | Fish Speech failed preflight | Check Modal logs: `modal app logs your-agent-voice`. Look for `FATAL:` messages. |
 | OpenClaw shows red | Gateway unreachable from Docker | Check `OPENCLAW_GATEWAY_URL`. Make sure the server is on the same network. |
 | Bot crashes on startup | Missing env vars | Check `.env` — `VOICE_SERVER_URL` must be set. |
 | High GPU bill | Dashboard kept GPU alive via health checks | Scale to zero works. Don't poll the GPU health endpoint from the browser. |
