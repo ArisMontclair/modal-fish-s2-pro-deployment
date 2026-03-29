@@ -22,6 +22,10 @@ image = (
     .run_commands("git clone --depth 1 https://github.com/fishaudio/fish-speech.git /app/fish-speech")
     .workdir("/app/fish-speech")
     .run_commands("pip install -e '.[server]'")
+    # Patch: fish-speech torchaudio UnboundLocalError with torch 2.8
+    .run_commands(
+        "sed -i 's/backends = torchaudio.list_audio_backends()/backends = torchaudio.list_audio_backends() if hasattr(torchaudio, \"list_audio_backends\") else []/' /app/fish-speech/fish_speech/inference_engine/reference_loader.py"
+    )
     .workdir("/app")
     .pip_install("fastapi", "uvicorn", "httpx")
     .run_commands("huggingface-cli download fishaudio/s2-pro --local-dir /models/s2-pro")
