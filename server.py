@@ -60,19 +60,23 @@ def server():
     whisper_model = None
     fish_proc = None
     server_ready = False
+    load_stage = "waiting"  # waiting → preflight → loading_fish → loading_whisper → ready / failed
 
     def _load_models():
-        nonlocal whisper_model, fish_proc, server_ready
+        nonlocal whisper_model, fish_proc, server_ready, load_stage
 
         # ─── Preflight checks (no GPU yet) ────────────────────
+        load_stage = "preflight"
         # 1. Verify model weights exist
         llama_ckpt = os.path.join(FISH_CHECKPOINT, "model.ckpt")
         codec_ckpt = os.path.join(FISH_CHECKPOINT, "codec.pth")
         if not os.path.exists(llama_ckpt):
             print(f"FATAL: Fish Speech weights not found at {llama_ckpt}")
+            load_stage = "failed: missing weights"
             return
         if not os.path.exists(codec_ckpt):
             print(f"FATAL: Fish Speech codec not found at {codec_ckpt}")
+            load_stage = "failed: missing codec"
             return
         print(f"Model weights verified: {FISH_CHECKPOINT}")
 
@@ -82,6 +86,7 @@ def server():
             print(f"fish-speech {fish_speech.__version__} imported OK")
         except Exception as e:
             print(f"FATAL: fish-speech import failed: {e}")
+            load_stage = f"failed: {e}"
             return
 
         # 3. Verify torchaudio works (was previous blocker)
@@ -90,12 +95,14 @@ def server():
             print(f"torchaudio {torchaudio.__version__} imported OK")
         except Exception as e:
             print(f"FATAL: torchaudio import failed: {e}")
+            load_stage = f"failed: {e}"
             return
 
         print("All preflight checks passed. Loading models onto GPU...")
 
         try:
             # 1. Start Fish Speech server
+            load_stage = "loading_fish"
             fish_cmd = [
                 "python", "-m", "tools.api_server",
                 "--llama-checkpoint-path", FISH_CHECKPOINT,
@@ -133,16 +140,19 @@ def server():
                 print("Fish Speech failed to start after 120s")
 
             # 3. Load Whisper
+            load_stage = "loading_whisper"
             from faster_whisper import WhisperModel
             print("Loading Whisper large-v3...")
             whisper_model = WhisperModel("large-v3", device="cuda", compute_type="float16")
             print("Whisper loaded.")
 
             server_ready = True
+            load_stage = "ready"
             print(f"=== Server ready (Fish: {'OK' if fish_ok else 'FAILED'}) ===")
 
         except Exception as e:
             print(f"Model loading failed: {e}")
+            load_stage = f"failed: {e}"
 
     threading.Thread(target=_load_models, daemon=True).start()
 
@@ -214,6 +224,7 @@ def server():
     def health():
         return {
             "status": "ready" if server_ready else "loading",
+            "stage": load_stage,
             "services": ["whisper-large-v3", "fish-speech-s2-pro"],
         }
 

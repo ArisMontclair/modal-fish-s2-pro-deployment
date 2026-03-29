@@ -331,6 +331,14 @@
         }
 
         // ─── Health checks ──────────────────────────────────────
+        const STAGE_LABELS = {
+            'waiting': 'Idle',
+            'preflight': 'Checking deps...',
+            'loading_fish': 'Starting Fish Speech...',
+            'loading_whisper': 'Loading Whisper...',
+            'ready': 'Ready',
+        };
+
         async function checkHealth() {
             // Modal GPU
             try {
@@ -338,10 +346,11 @@
                 const data = await resp.json();
                 if (data.status === 'ready') {
                     setStatus('modal', 'ok', 'Ready');
-                    log('Modal GPU: ready', 'success');
                 } else if (data.status === 'loading') {
-                    setStatus('modal', 'wait', 'Loading...');
-                    log('Modal GPU: loading models...', 'warn');
+                    const stage = data.stage || 'loading';
+                    const label = STAGE_LABELS[stage] || stage;
+                    setStatus('modal', 'wait', label);
+                    log('Modal GPU: ' + label, 'warn');
                 } else {
                     setStatus('modal', 'err', 'Down');
                     log('Modal GPU: unreachable', 'error');

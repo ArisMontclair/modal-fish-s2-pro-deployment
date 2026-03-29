@@ -292,7 +292,7 @@ async def health_modal():
                 timeout=aiohttp.ClientTimeout(total=5),
             ) as resp:
                 data = await resp.json()
-                return {"status": data.get("status", "unknown")}
+                return {"status": data.get("status", "unknown"), "stage": data.get("stage", "")}
     except Exception as e:
         return {"status": "unreachable", "error": str(e)}
 
