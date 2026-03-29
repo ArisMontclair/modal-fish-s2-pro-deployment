@@ -14,10 +14,10 @@ import modal
 image = (
     modal.Image.from_registry(
         "nvidia/cuda:12.4.1-devel-ubuntu22.04",
-        add_python="3.12",
+        add_python="3.11",
     )
     .uv_pip_install("faster-whisper==1.1.1")
-    .uv_pip_install("orpheus-speech==0.1.0", "vllm==0.8.3")
+    .uv_pip_install("orpheus-speech==0.1.0", "vllm==0.7.3")
     .uv_pip_install("fastapi", "uvicorn", "httpx")
 )
 
