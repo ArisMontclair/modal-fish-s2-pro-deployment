@@ -1,14 +1,13 @@
 """
-Aris Voice GPU Server on Modal
-Combines Whisper STT + Fish Speech S2 Pro TTS on a single GPU.
+CLAWRION GPU Server on Modal
+Orpheus TTS + Whisper STT on a single A10G GPU.
 
 Deploy:  modal deploy server.py
 STT:     POST /v1/transcribe (multipart audio file)
-TTS:     POST /v1/tts (JSON body with "text")
+TTS:     POST /v1/tts (JSON body with "text", optional "voice")
 Health:  GET /health
 """
 
-import subprocess
 import modal
 
 # ─── Image ──────────────────────────────────────────────────────
@@ -17,23 +16,14 @@ image = (
         "nvidia/cuda:12.4.1-devel-ubuntu22.04",
         add_python="3.12",
     )
-    .apt_install("git", "ffmpeg", "clang", "libportaudio2", "portaudio19-dev")
+    .apt_install("git")
     .uv_pip_install("faster-whisper==1.1.1")
-    .run_commands("git clone --depth 1 --branch v2.0.0-beta https://github.com/fishaudio/fish-speech.git /app/fish-speech")
-    .workdir("/app/fish-speech")
-    .run_commands("pip install -e '.[server]'")
-    # Patch: fish-speech torchaudio circular import bug with torch 2.8
-    .add_local_file("patch_torchaudio.py", "/tmp/patch_torchaudio.py", copy=True)
-    .run_commands("python3 /tmp/patch_torchaudio.py")
-    .workdir("/app")
+    .uv_pip_install("orpheus-speech", "vllm==0.7.3")
     .uv_pip_install("fastapi", "uvicorn", "httpx")
-    .run_commands("huggingface-cli download fishaudio/s2-pro --local-dir /models/s2-pro")
 )
 
 # ─── App ────────────────────────────────────────────────────────
 app = modal.App("aris-voice", image=image)
-
-FISH_CHECKPOINT = "/models/s2-pro"
 PORT = 8080
 
 
@@ -48,112 +38,47 @@ PORT = 8080
 )
 @modal.web_server(port=PORT, startup_timeout=300)
 def server():
-    """Combined Whisper STT + Fish Speech TTS on one GPU."""
+    """Orpheus TTS + Whisper STT on one GPU."""
+    import io
     import os
     import tempfile
     import threading
-    import time
+    import wave
     from fastapi import FastAPI, UploadFile, Form, HTTPException
     from fastapi.responses import JSONResponse, Response
-    import httpx
     import uvicorn
 
-    web_app = FastAPI(title="Aris Voice Server")
+    web_app = FastAPI(title="CLAWRION Voice Server")
 
     whisper_model = None
-    fish_proc = None
+    tts_model = None
     server_ready = False
-    load_stage = "waiting"  # waiting → preflight → loading_fish → loading_whisper → ready / failed
+    load_stage = "waiting"
 
     def _load_models():
-        nonlocal whisper_model, fish_proc, server_ready, load_stage
-
-        # ─── Preflight checks (no GPU yet) ────────────────────
-        load_stage = "preflight"
-        # 1. Verify model weights exist
-        if not os.path.exists(FISH_CHECKPOINT):
-            print(f"FATAL: Fish Speech weights dir not found at {FISH_CHECKPOINT}")
-            load_stage = "failed: missing weights"
-            return
-        if not os.path.exists(os.path.join(FISH_CHECKPOINT, "codec.pth")):
-            print(f"FATAL: Fish Speech codec not found at {FISH_CHECKPOINT}/codec.pth")
-            load_stage = "failed: missing codec"
-            return
-        if not os.path.exists(os.path.join(FISH_CHECKPOINT, "model.safetensors.index.json")):
-            print(f"FATAL: Fish Speech model index not found at {FISH_CHECKPOINT}/model.safetensors.index.json")
-            load_stage = "failed: missing model index"
-            return
-        print(f"Model weights verified: {FISH_CHECKPOINT}")
-
-        # 2. Verify fish-speech imports cleanly
-        try:
-            import fish_speech
-            print("fish-speech imported OK")
-        except Exception as e:
-            print(f"FATAL: fish-speech import failed: {e}")
-            load_stage = f"failed: {e}"
-            return
-
-        # 3. Verify torchaudio works (was previous blocker)
-        try:
-            import torchaudio
-            print(f"torchaudio {torchaudio.__version__} imported OK")
-        except Exception as e:
-            print(f"FATAL: torchaudio import failed: {e}")
-            load_stage = f"failed: {e}"
-            return
-
-        print("All preflight checks passed. Loading models onto GPU...")
+        nonlocal whisper_model, tts_model, server_ready, load_stage
 
         try:
-            # 1. Start Fish Speech server
-            load_stage = "loading_fish"
-            fish_cmd = [
-                "python", "-m", "tools.api_server",
-                "--llama-checkpoint-path", FISH_CHECKPOINT,
-                "--decoder-checkpoint-path", f"{FISH_CHECKPOINT}/codec.pth",
-                "--listen", "127.0.0.1:8081",
-                "--half",
-            ]
-            print(f"Starting Fish Speech: {' '.join(fish_cmd)}")
-            fish_proc = subprocess.Popen(
-                fish_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd="/app/fish-speech",
+            # 1. Load Orpheus TTS
+            load_stage = "loading_tts"
+            print("Loading Orpheus TTS model...")
+            from orpheus_tts import OrpheusModel
+            tts_model = OrpheusModel(
+                model_name="canopylabs/orpheus-tts-0.1-finetune-prod",
+                max_model_len=2048,
             )
+            print("Orpheus TTS loaded.")
 
-            def _log_stderr():
-                for line in fish_proc.stderr:
-                    print(f"[FishSpeech] {line.decode(errors='replace').rstrip()}")
-            threading.Thread(target=_log_stderr, daemon=True).start()
-
-            # 2. Wait for Fish Speech
-            fish_ok = False
-            for i in range(60):
-                try:
-                    resp = httpx.get("http://127.0.0.1:8081/health", timeout=2.0)
-                    if resp.status_code == 200:
-                        fish_ok = True
-                        print("Fish Speech ready.")
-                        break
-                except Exception:
-                    pass
-                time.sleep(2)
-
-            if not fish_ok:
-                print("Fish Speech failed to start after 120s")
-
-            # 3. Load Whisper
+            # 2. Load Whisper
             load_stage = "loading_whisper"
+            print("Loading Whisper medium...")
             from faster_whisper import WhisperModel
-            print("Loading Whisper large-v3...")
-            whisper_model = WhisperModel("large-v3", device="cuda", compute_type="float16")
+            whisper_model = WhisperModel("medium", device="cuda", compute_type="float16")
             print("Whisper loaded.")
 
             server_ready = True
             load_stage = "ready"
-            print(f"=== Server ready (Fish: {'OK' if fish_ok else 'FAILED'}) ===")
+            print("=== Server ready ===")
 
         except Exception as e:
             print(f"Model loading failed: {e}")
@@ -198,28 +123,28 @@ def server():
         if not text:
             raise HTTPException(400, "text required")
 
-        payload = {
-            "text": text,
-            "format": request_data.get("format", "wav"),
-            "normalize": request_data.get("normalize", True),
-            "temperature": request_data.get("temperature", 0.7),
-            "top_p": request_data.get("top_p", 0.7),
-            "repetition_penalty": request_data.get("repetition_penalty", 1.2),
-            "chunk_length": request_data.get("chunk_length", 200),
-        }
-        if request_data.get("reference_id"):
-            payload["reference_id"] = request_data["reference_id"]
+        voice = request_data.get("voice", "tara")
 
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post("http://127.0.0.1:8081/v1/tts", json=payload)
-                if resp.status_code != 200:
-                    raise HTTPException(resp.status_code, f"Fish Speech error: {resp.text}")
-                return Response(
-                    content=resp.content,
-                    media_type="audio/wav",
-                    headers={"Content-Disposition": "inline; filename=speech.wav"},
-                )
+            syn_tokens = tts_model.generate_speech(
+                prompt=text,
+                voice=voice,
+            )
+
+            # Write tokens to WAV
+            buf = io.BytesIO()
+            with wave.open(buf, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(24000)
+                for chunk in syn_tokens:
+                    wf.writeframes(chunk)
+
+            return Response(
+                content=buf.getvalue(),
+                media_type="audio/wav",
+                headers={"Content-Disposition": "inline; filename=speech.wav"},
+            )
         except HTTPException:
             raise
         except Exception as e:
@@ -230,7 +155,7 @@ def server():
         return {
             "status": "ready" if server_ready else "loading",
             "stage": load_stage,
-            "services": ["whisper-large-v3", "fish-speech-s2-pro"],
+            "services": ["whisper-medium", "orpheus-tts"],
         }
 
     uvicorn.run(web_app, host="0.0.0.0", port=PORT)
@@ -240,4 +165,4 @@ def server():
 @app.function(image=modal.Image.debian_slim().uv_pip_install("fastapi"), timeout=10)
 @modal.fastapi_endpoint(method="GET", label="health")
 def health():
-    return {"status": "ok", "services": ["whisper-large-v3", "fish-speech-s2-pro"]}
+    return {"status": "ok", "services": ["whisper-medium", "orpheus-tts"]}
