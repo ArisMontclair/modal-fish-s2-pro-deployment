@@ -23,39 +23,8 @@ image = (
     .workdir("/app/fish-speech")
     .run_commands("pip install -e '.[server]'")
     # Patch: fish-speech torchaudio circular import bug with torch 2.8
-    # list_audio_backends() was removed in torchaudio 2.8, the except block
-    # re-imports torchaudio.io which causes a circular import → UnboundLocalError
-    .run_commands(
-        """python3 -c "
-import pathlib
-p = pathlib.Path('/app/fish-speech/fish_speech/inference_engine/reference_loader.py')
-src = p.read_text()
-old = '''        try:
-            backends = torchaudio.list_audio_backends()
-            if \\\"ffmpeg\\\" in backends:
-                self.backend = \\\"ffmpeg\\\"
-            else:
-                self.backend = \\\"soundfile\\\"
-        except AttributeError:
-            # torchaudio 2.9+ removed list_audio_backends()
-            # Try ffmpeg first, fallback to soundfile
-            try:
-                import torchaudio.io._load_audio_fileobj  # noqa: F401
-
-                self.backend = \\\"ffmpeg\\\"
-            except (ImportError, ModuleNotFoundError):
-                self.backend = \\\"soundfile\\\"'''
-new = '''        try:
-            backends = torchaudio.list_audio_backends()
-            self.backend = \\\"ffmpeg\\\" if \\\"ffmpeg\\\" in backends else \\\"soundfile\\\"
-        except (AttributeError, UnboundLocalError):
-            self.backend = \\\"soundfile\\\"'''
-assert old in src, f'Patch target not found in {p}: torchaudio patch failed'
-p.write_text(src.replace(old, new))
-print('Patched reference_loader.py')
-"
-"""
-    )
+    .add_local_file("patch_torchaudio.py", "/tmp/patch_torchaudio.py", copy=True)
+    .run_commands("python3 /tmp/patch_torchaudio.py")
     .workdir("/app")
     .uv_pip_install("fastapi", "uvicorn", "httpx")
     .run_commands("huggingface-cli download fishaudio/s2-pro --local-dir /models/s2-pro")
