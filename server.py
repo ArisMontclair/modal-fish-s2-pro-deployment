@@ -15,10 +15,10 @@ import modal
 image = (
     modal.Image.from_registry(
         "nvidia/cuda:12.4.1-devel-ubuntu22.04",
-        add_python="3.12",
+        add_python="3.11",
     )
     .uv_pip_install("faster-whisper==1.1.1")
-    .uv_pip_install("vllm==0.7.3", "transformers==4.48.3")
+    .uv_pip_install("vllm==0.7.3")
     .apt_install("git")
     .run_commands(
         "pip install git+https://github.com/canopyai/Orpheus-TTS.git#subdirectory=orpheus_tts_pypi"
