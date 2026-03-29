@@ -85,7 +85,7 @@ def server():
         # 2. Verify fish-speech imports cleanly
         try:
             import fish_speech
-            print(f"fish-speech {fish_speech.__version__} imported OK")
+            print("fish-speech imported OK")
         except Exception as e:
             print(f"FATAL: fish-speech import failed: {e}")
             load_stage = f"failed: {e}"
