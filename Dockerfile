@@ -8,6 +8,7 @@ WORKDIR /app
 # Copy OpenClaw CLI from node stage
 COPY --from=openclaw /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=openclaw /usr/local/bin/openclaw /usr/local/bin/openclaw
+COPY --from=openclaw /usr/local/bin/node /usr/local/bin/node
 
 # Install system deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
