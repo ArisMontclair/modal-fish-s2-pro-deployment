@@ -19,10 +19,6 @@ image = (
     .uv_pip_install("faster-whisper==1.1.1")
     .uv_pip_install("orpheus-speech==0.1.0", "vllm==0.7.3")
     .uv_pip_install("fastapi", "uvicorn", "httpx")
-    # Pre-download Orpheus model to avoid runtime download on cold start
-    .run_commands(
-        "python3 -c \"from huggingface_hub import snapshot_download; snapshot_download('canopylabs/orpheus-tts-0.1-finetune-prod')\""
-    )
 )
 
 # ─── App ────────────────────────────────────────────────────────
